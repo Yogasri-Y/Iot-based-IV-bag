@@ -1,0 +1,162 @@
+//Author- Moulish Arunachalam; date-12.03.2021; IV fluid level measuring and transmitting final code
+
+//weighing mechanism headers start
+int resetbutton = D4;
+#include <HX711.h>
+#define wifi_led D0
+#define level_led D7
+#include <HX711.h>
+#define DOUT D1
+#define CLK D2
+HX711 scale;
+const float initial=541;
+const int LOADCELL_DOUT_PIN = D1;
+const int LOADCELL_SCK_PIN = D2;
+float percentage;
+float gram;
+float weight; 
+float calibration_factor = 419640; //419640 original
+//weighing mechanism header end
+
+//data transmitting over wifi - headers
+#include "ThingsBoard.h"
+#include <ESP8266WiFi.h>
+#define WIFI_AP             "OnePlus 8 Pro"
+#define WIFI_PASSWORD       "qwertyuiop"
+
+#define TOKEN               "UQ1jNVTwSrLXaOZADTRY"
+#define THINGSBOARD_SERVER  "demo.thingsboard.io"
+
+// Baud rate for debug serial
+#define SERIAL_DEBUG_BAUD   115200
+
+// Initialize ThingsBoard client
+WiFiClient espClient;
+// Initialize ThingsBoard instance
+ThingsBoard tb(espClient);
+// the Wifi radio's status
+int status = WL_IDLE_STATUS;
+
+void setup() {
+  pinMode(resetbutton, INPUT_PULLUP);
+//wifi setup code starts
+  // initialize serial for debugging
+  Serial.begin(SERIAL_DEBUG_BAUD);
+  WiFi.begin(WIFI_AP, WIFI_PASSWORD);
+  InitWiFi();
+  //wifi setup code ends
+   
+  //weighing mechanism setup code starts
+  scale.begin(DOUT, CLK);
+  Serial.begin(9600);
+  Serial.println("HX711 calibration sketch");
+  Serial.println("Remove all weight from scale");
+  Serial.println("After readings begin, place known weight on scale");
+  Serial.println("Press + or a to increase calibration factor");
+  Serial.println("Press - or z to decrease calibration factor");
+  scale.set_scale();
+  scale.tare(); //Reset the scale to 0
+  long zero_factor = scale.read_average(); //Get a baseline reading
+  Serial.print("Zero factor: "); //This can be used to remove the need to tare the scale. Useful in permanent scale projects.
+  Serial.println(zero_factor);
+  //weighing mechanism setup code ends
+}
+
+
+void loop() {
+   //wifi loop code starts
+  //delay(1000);
+
+  if (WiFi.status() != WL_CONNECTED) {
+     tone(wifi_led,780);
+    reconnect();
+  }
+
+  if (!tb.connected()) {
+    // Connect to the ThingsBoard
+    Serial.print("Connecting to: ");
+    Serial.print(THINGSBOARD_SERVER);
+    Serial.print(" with token ");
+    Serial.println(TOKEN);
+    if (!tb.connect(THINGSBOARD_SERVER, TOKEN)) {
+      Serial.println("Failed to connect");
+     
+      return;
+    }
+  }
+  //wifi loop code ends
+     
+  //weighing mechanism loop code starts
+  scale.set_scale(calibration_factor); //Adjust to this calibration factor
+  Serial.print("Reading: ");
+  weight = scale.get_units(10);
+  gram=weight*1000.000;
+  percentage = (gram/initial)*100;
+  Serial.print(scale.get_units(), 2);
+ // Serial.print(" lbs"); 
+  Serial.print("Kilogram:");
+  Serial.print( weight); 
+  Serial.print(" Kg");
+  Serial.print("gram:");
+  Serial.print(gram);
+  Serial.print(" calibration_factor: ");
+  Serial.print(calibration_factor);
+  Serial.print("percentage: ");
+  Serial.print(percentage);
+  Serial.println();
+  if(Serial.available())
+  {
+    char temp = Serial.read();
+    if(temp == '+' || temp == 'a')
+      calibration_factor += 10;
+    else if(temp == '-' || temp == 'z')
+      calibration_factor -= 10;
+  }
+   if ( digitalRead(resetbutton) == LOW)
+{
+  scale.set_scale();
+  scale.tare(); //Reset the scale to 0
+}
+  if(percentage<5)
+  {
+        tone(level_led,780,200);
+    
+    }
+  //delay(400);
+  //weighing mechanism loop code ends
+
+  Serial.println("Sending data...");
+
+  // Uploads new telemetry to ThingsBoard using MQTT.
+  
+
+  tb.sendTelemetryFloat("Level of IV left",percentage);
+
+  tb.loop();
+}
+
+void InitWiFi()
+{
+  Serial.println("Connecting to AP ...");
+  // attempt to connect to WiFi network
+
+  WiFi.begin(WIFI_AP, WIFI_PASSWORD);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("Connected to AP");
+}
+
+void reconnect() {
+  // Loop until we're reconnected
+  status = WiFi.status();
+  if ( status != WL_CONNECTED) {
+    WiFi.begin(WIFI_AP, WIFI_PASSWORD);
+    while (WiFi.status() != WL_CONNECTED) {
+      delay(500);
+      Serial.print(".");
+    }
+    Serial.println("Connected to AP");
+  }
+}
